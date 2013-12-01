@@ -6,6 +6,7 @@ package filecopy;
  Autoren:
  */
 
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.DatagramPacket;
@@ -60,6 +61,8 @@ public class FileCopyClient extends Thread {
   private long deviation; //Variable to incorporate RTT variance
   
   private int numberOfTimeouts = 0;
+  
+  private FileInputStream inFromFile;
   // ... ToDo
 
 
@@ -76,23 +79,30 @@ public class FileCopyClient extends Thread {
   }
 
   public void runFileCopyClient() throws IOException {
-	  clientSocket = new DatagramSocket();
-	  //1.Buffer füllen -> Lese x Pakete à 8Byte SeqNumber und 1000Byte Daten ein.
-	  //2a.Sende KontrollPaket
-	  //(2b.Server stellt sich dem kontrollpaket entsprechend ein)
-	  //3.Sende die Daten-Pakete (Alle auf einmal? -> ack verpasst?(vlt eigener Thread zum warten auf antwort))
-	  //4.Warte auf Antwort
-	  //5.Antwort gekommen -> Markiere das Packet des ack als empfangen
-	  //6.Betrachte 1. element der Liste. Entferne es, wenn es als empfangen markiert ist.
-	  //7.wiederhole 5. bis das 1. element der liste nicht markiert ist.
-	  //8.Fülle den Buffer, bis dieser eine größe von windowSize erreicht hat oder alle Daten der datei eingelesen wurden und sende die neuen Pakete.
-	  //9.gehe zu 3 wenn der buffer nicht leer ist
-      // ToDo!!
-	  //WillBeDone
-	  
-	  
-	  
-  }
+	   clientSocket = new DatagramSocket();
+	   inFromFile = new FileInputStream(sourcePath);
+	   int inputStreamReturnValue = 1;
+	   //1a.KontrollPaket erstellen und in den Buffer schreiben
+	   sendBuffer.add(makeControlPacket());
+	   //1b.Buffer füllen -> Lese x Pakete à 8Byte SeqNumber und 1000Byte Daten ein.
+	   for(long i = 1;i<windowSize&& inputStreamReturnValue!=-1;i++){ //From Packet Number 1 to Number windowSize-1
+	    byte[] data = new byte[UDP_PACKET_SIZE-8];
+	    inputStreamReturnValue = inFromFile.read(data);
+	    FCpacket packet = new FCpacket(i, data, UDP_PACKET_SIZE-8);
+	    sendBuffer.add(packet);
+	   }
+	   //2a.Sende KontrollPaket
+	   //(2b.Server stellt sich dem kontrollpaket entsprechend ein)
+	   //3.Sende die Daten-Pakete (Alle auf einmal? -> ack verpasst?(vlt eigener Thread zum warten auf antwort))
+	   //4.Warte auf Antwort
+	   //5.Antwort gekommen -> Markiere das Packet des ack als empfangen
+	   //6.Betrachte 1. element der Liste. Entferne es, wenn es als empfangen markiert ist.
+	   //7.wiederhole 5. bis das 1. element der liste nicht markiert ist.
+	   //8.Fülle den Buffer, bis dieser eine größe von windowSize erreicht hat oder alle Daten der datei eingelesen wurden und sende die neuen Pakete.
+	   //9.gehe zu 3 wenn der buffer nicht leer ist
+	      // ToDo!!
+	   //WillBeDone   
+	  }
 
   /**
   *
