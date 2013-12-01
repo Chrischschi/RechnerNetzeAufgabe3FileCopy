@@ -1,7 +1,7 @@
 package filecopy;
 
 /* FileCopyClient.java
- Version 0.1 - Muss ergï¿½nzt werden!!
+ Version 0.1 - Muss ergänzt werden!!
  Praktikum 3 Rechnernetze BAI4 HAW Hamburg
  Autoren:
  */
@@ -12,8 +12,6 @@ import java.io.UnsupportedEncodingException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.LinkedList;
 
@@ -62,10 +60,18 @@ public class FileCopyClient extends Thread {
   
   private int numberOfTimeouts = 0;
   
-  private FileInputStream inFromFile;
+  private FileInputStream inFromFile; //Stream to read the File at the sourcePath
+
+  byte[] receiveData;
+  
+  InetAddress receivedIPAddress;
+  
+  DatagramPacket udpReceivePacket;
+  
+  long currentPacketNumber = 1;
   // ... ToDo
-
-
+  
+  
   // Constructor
   public FileCopyClient(String serverArg, String sourcePathArg,
     String destPathArg, String windowSizeArg, String errorRateArg) throws UnknownHostException {
@@ -76,32 +82,56 @@ public class FileCopyClient extends Thread {
     windowSize = Integer.parseInt(windowSizeArg);
     serverErrorRate = Long.parseLong(errorRateArg);
     sendBuffer = new LinkedList<FCpacket>();
+    receiveData = new byte[8];
   }
 
   public void runFileCopyClient() throws IOException {
-	   clientSocket = new DatagramSocket();
-	   inFromFile = new FileInputStream(sourcePath);
-	   int inputStreamReturnValue = 1;
-	   //1a.KontrollPaket erstellen und in den Buffer schreiben
-	   sendBuffer.add(makeControlPacket());
-	   //1b.Buffer fÃ¼llen -> Lese x Pakete Ã  8Byte SeqNumber und 1000Byte Daten ein.
-	   for(long i = 1;i<windowSize&& inputStreamReturnValue!=-1;i++){ //From Packet Number 1 to Number windowSize-1
-	    byte[] data = new byte[UDP_PACKET_SIZE-8];
-	    inputStreamReturnValue = inFromFile.read(data);
-	    FCpacket packet = new FCpacket(i, data, UDP_PACKET_SIZE-8);
-	    sendBuffer.add(packet);
-	   }
-	   //2a.Sende KontrollPaket
-	   //(2b.Server stellt sich dem kontrollpaket entsprechend ein)
-	   //3.Sende die Daten-Pakete (Alle auf einmal? -> ack verpasst?(vlt eigener Thread zum warten auf antwort))
-	   //4.Warte auf Antwort
-	   //5.Antwort gekommen -> Markiere das Packet des ack als empfangen
-	   //6.Betrachte 1. element der Liste. Entferne es, wenn es als empfangen markiert ist.
-	   //7.wiederhole 5. bis das 1. element der liste nicht markiert ist.
-	   //8.FÃ¼lle den Buffer, bis dieser eine grÃ¶ÃŸe von windowSize erreicht hat oder alle Daten der datei eingelesen wurden und sende die neuen Pakete.
-	   //9.gehe zu 3 wenn der buffer nicht leer ist
-	      // ToDo!!
-	   //WillBeDone   
+	  clientSocket = new DatagramSocket();
+	  inFromFile = new FileInputStream(sourcePath);
+	  int inputStreamReturnValue = 1;
+	  //1a.KontrollPaket erstellen und in den Buffer schreiben
+	  sendBuffer.add(makeControlPacket());
+	  //1b.Buffer füllen -> Lese x Pakete à 8Byte SeqNumber und 1000Byte Daten ein.
+	  while(sendBuffer.size()<windowSize&& inputStreamReturnValue!=-1){ //From Packet Number 1 to Number windowSize-1
+		  byte[] data = new byte[UDP_PACKET_SIZE-8];
+		  inputStreamReturnValue = inFromFile.read(data);
+		  FCpacket packet = new FCpacket(currentPacketNumber, data, UDP_PACKET_SIZE-8);
+		  sendBuffer.add(packet);
+		  currentPacketNumber++;
+	  }
+	  //2a.Sende KontrollPaket
+	  //TODO
+	  //(2b.Server stellt sich dem kontrollpaket entsprechend ein)
+	  //TODO
+	  while(!sendBuffer.isEmpty()){
+		  //3.Sende die Daten-Pakete (Alle auf einmal? -> ack verpasst?(vlt eigener Thread zum warten auf antwort))
+		  //TODO
+		  //4.Warte auf Antwort
+		  udpReceivePacket = new DatagramPacket(receiveData, UDP_PACKET_SIZE);
+	        // Wait for data packet
+	        clientSocket.receive(udpReceivePacket);
+	        receivedIPAddress = udpReceivePacket.getAddress();
+	        if(receivedIPAddress.equals(serverAdress)){
+	          //5.Antwort gekommen -> Markiere das Packet des ack als empfangen
+	        	FCpacket ackPacket = new FCpacket(udpReceivePacket.getData(), udpReceivePacket.getLength());
+	        	int SeqNum = new Long(ackPacket.getSeqNum()).intValue();
+	        	sendBuffer.get(SeqNum).setValidACK(true);
+	        	//6.Betrachte 1. element der Liste. Entferne es, wenn es als empfangen markiert ist.
+	        	//7.wiederhole 6. bis das 1. element der liste nicht markiert ist.
+	        	while(sendBuffer.getFirst().isValidACK()){	        		
+	        		sendBuffer.removeFirst();
+	        	}	  		  
+	  		  //8.Fülle den Buffer, bis dieser eine größe von windowSize erreicht hat oder alle Daten der datei eingelesen wurden und sende die neuen Pakete.
+	        	while(sendBuffer.size()<windowSize){
+	        	byte[] data = new byte[UDP_PACKET_SIZE-8];
+	      		  inputStreamReturnValue = inFromFile.read(data);
+	      		  FCpacket packet = new FCpacket(currentPacketNumber, data, UDP_PACKET_SIZE-8);
+	      		  sendBuffer.add(packet);
+	      		  currentPacketNumber++;
+	        	}
+	  		  //9.gehe zu 3 wenn der buffer nicht leer ist
+	        } 
+	  }
 	  }
 
   /**
