@@ -53,7 +53,7 @@ public class FCpacket implements Comparable<FCpacket> {
   /**
    * Save a reference to a timer thread for the FCpacket
    */
-  public void setTimer(FC_Timer t) {
+  public synchronized void setTimer(FC_Timer t) {
     timer = t;
   }
 
@@ -103,7 +103,7 @@ public class FCpacket implements Comparable<FCpacket> {
   /**
    * Returns the timer thread as FC_Timer object
    */
-  public FC_Timer getTimer() {
+  public synchronized FC_Timer getTimer() {
     return timer;
   }
 
