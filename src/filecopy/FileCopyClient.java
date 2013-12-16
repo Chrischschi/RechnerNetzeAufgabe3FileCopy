@@ -14,14 +14,15 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
+
+import util.huebner.BoundedBuffer;
+import util.huebner.BoundedBufferSyncMonitor;
 
 public class FileCopyClient extends Thread {
 
 	// -------- Constants
-	public final static boolean TEST_OUTPUT_MODE = false;
+	public final static boolean TEST_OUTPUT_MODE = true;
 
 	public final int SERVER_PORT = 23000;
 
@@ -55,10 +56,10 @@ public class FileCopyClient extends Thread {
 	// -------- Variables added by us
 
 	private InetAddress serverAdress;
-
+	
 	private DatagramSocket clientSocket;
-
-	private LinkedList<FCpacket> sendBuffer; // A list of the packets of the
+	
+	private BoundedBuffer<FCpacket> sendBuffer; // A list of the packets of the
 												// current window (Use a
 												// ArrayList?)
 
@@ -69,16 +70,10 @@ public class FileCopyClient extends Thread {
 
 	private long deviation; // Variable to incorporate RTT variance
 
-	private int numberOfTimeouts = 0;
+	int numberOfTimeouts = 0;
 
 	private FileInputStream inFromFile; // Stream to read the File at the
 										// sourcePath
-
-	byte[] receiveData;
-
-	InetAddress receivedIPAddress;
-
-	DatagramPacket udpReceivePacket;
 
 	long currentPacketNumber = 1;
 	
@@ -96,103 +91,58 @@ public class FileCopyClient extends Thread {
 		destPath = destPathArg;
 		windowSize = Integer.parseInt(windowSizeArg);
 		serverErrorRate = Long.parseLong(errorRateArg);
-		sendBuffer = new LinkedList<FCpacket>();
-		receiveData = new byte[8];
+		sendBuffer = new BoundedBufferSyncMonitor<>(windowSize);
 	}
 
 	public void runFileCopyClient() throws IOException {
 		time = System.nanoTime();
 		clientSocket = new DatagramSocket();
 		inFromFile = new FileInputStream(sourcePath);
+		new FCReciever(sendBuffer, serverAdress, this);
 		int inputStreamReturnValue = 1;
 		// 1a.KontrollPaket erstellen und in den Buffer schreiben
 		// sendBuffer.add(makeControlPacket()); //KontrollPaket wird direkt beim
 		// senden erstellt.
-		// 1b.Buffer f�llen -> Lese x Pakete � 8Byte SeqNumber und 1000Byte
-		// Daten ein.
-//		while (sendBuffer.size() < windowSize && inputStreamReturnValue != -1) { // From
-//																					// Packet
-//																					// Number
-//																					// 1
-//																					// to
-//																					// Number
-//																					// windowSize-1
-//			byte[] data = new byte[UDP_PACKET_SIZE - 8];
-//			inputStreamReturnValue = inFromFile.read(data);
-//			FCpacket packet = new FCpacket(currentPacketNumber, data,
-//					UDP_PACKET_SIZE - 8);
-//			sendBuffer.add(packet);
-//			currentPacketNumber++;
-//		}
 		// 2.Sende KontrollPaket
 		FCpacket controlPacket = makeControlPacket();
-		sendBuffer.add(controlPacket);
+		sendBuffer.enter(controlPacket);
 		startTimer(controlPacket);
 		new sendThread(toDatagramPacket(controlPacket)).start();
 		
-		while (!sendBuffer.isEmpty()) { //siehe punkt 9
-			// 3.Warte auf Antwort
-			udpReceivePacket = new DatagramPacket(receiveData, receiveData.length);
-			clientSocket.receive(udpReceivePacket);
-			receivedIPAddress = udpReceivePacket.getAddress();
-			if (receivedIPAddress.equals(serverAdress)) {
-				// 4.Antwort gekommen -> Markiere das Packet des ack als
-				// empfangen
-				FCpacket ackPacket = new FCpacket(udpReceivePacket.getData(),
-						udpReceivePacket.getLength());
-				testOut("ACK Packet " + ackPacket.getSeqNum());
-				
-				long SeqNum = ackPacket.getSeqNum();
-				int sendBufferIndex = new Long(SeqNum - sendBuffer.get(0).getSeqNum()).intValue();
-				if(sendBufferIndex>=0){
-					FCpacket ackedPacket = sendBuffer.get(sendBufferIndex);
-					ackedPacket.setValidACK(true);
-					cancelTimer(ackedPacket);
-				}
-				// 5.Betrachte 1. element der Liste. Entferne es, wenn es als
-				// empfangen markiert ist.
-				// 6.wiederhole 6. bis das 1. element der liste nicht markiert
-				// ist.
-				while (!sendBuffer.isEmpty()&&sendBuffer.getFirst().isValidACK()) {
-					sendBuffer.removeFirst();
-				}
+			
 				// 7.F�lle den Buffer, bis dieser eine gr��e von windowSize
 				// erreicht hat oder alle Daten der datei eingelesen wurden und
 				// sende die neuen Pakete.
-				List<FCpacket> newPackets = new ArrayList<FCpacket>();
-				while (sendBuffer.size() < windowSize && inputStreamReturnValue != -1) {
-					byte[] data = new byte[UDP_PACKET_SIZE - 8];
-					inputStreamReturnValue = inFromFile.read(data, 0, data.length);
-					testOut("trying to read Packet Number " + currentPacketNumber + "." + (inputStreamReturnValue==-1?" Reading failed":" Reading succeeded"));
-					if(inputStreamReturnValue != -1){
-					FCpacket packet = new FCpacket(currentPacketNumber, data,
-							UDP_PACKET_SIZE - 8);
-					sendBuffer.add(packet);
-					newPackets.add(packet);
-					currentPacketNumber++;
-					}
-				}
-				// 8.Sende die Daten-Pakete (Alle auf einmal? -> ack verpasst?(vlt
-				// eigener Thread zum warten auf antwort))
-				for (FCpacket packet : newPackets) {
-					startTimer(packet);
-					new sendThread(toDatagramPacket(packet)).start();
-				}
+		while (inputStreamReturnValue != -1) {
+			byte[] data = new byte[UDP_PACKET_SIZE - 8];
+			inputStreamReturnValue = inFromFile.read(data, 0, data.length);
+			testOut("trying to read Packet Number " + currentPacketNumber + "." + (inputStreamReturnValue==-1?" Reading failed":" Reading succeeded"));
+			if(inputStreamReturnValue != -1){
+			FCpacket newPacket = new FCpacket(currentPacketNumber, data,
+					UDP_PACKET_SIZE - 8);
+			sendBuffer.enter(newPacket);
+			startTimer(newPacket);
+			new sendThread(toDatagramPacket(newPacket)).start();
+			currentPacketNumber++;
 			}
-		}// 9.gehe zu 3 wenn der buffer nicht leer ist
-		clientSocket.close();
+		}
+		if(!sendBuffer.isEmpty()){
+			try {
+				this.wait();
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+		// 8.Sende die Daten-Pakete (Alle auf einmal? -> ack verpasst?(vlt
+		// eigener Thread zum warten auf antwort))
+		 // 9.gehe zu 3 wenn der buffer nicht leer ist
 		inFromFile.close();
-		System.out.println("Zeit: " + (System.nanoTime()-time));
+		System.out.println("Zeit: " + (System.nanoTime()-time)/1E6);
 		System.out.println("Timeouts: " + numberOfTimeouts);
-		System.out.println("RTT: " + estimatedRTT);
+		System.out.println("RTT: " + estimatedRTT/1E6);
 		testOut("Error check...");
-		if(sendBuffer.isEmpty()){
-			testOut("No errors");
-		}else{
-		for (int i=0; i<sendBuffer.size();i++){
-			testOut("ERROR: missed packet " + sendBuffer.get(i).getSeqNum());
-		}
-		}
+		
 	}
 
 	/**
@@ -225,7 +175,7 @@ public class FileCopyClient extends Thread {
 		int currentIndexOfPacket = new Long(seqNum
 				- sendBuffer.get(0).getSeqNum()).intValue();
 		if(currentIndexOfPacket>=0){
-		numberOfTimeouts++;
+		//numberOfTimeouts++;
 		FCpacket packet = sendBuffer.get(currentIndexOfPacket);
 //		cancelTimer(packet);
 		startTimer(packet);
@@ -251,7 +201,7 @@ public class FileCopyClient extends Thread {
 		deviation = new Float((1 - INFLUENCE_COEFFICIENT) * deviation
 				+ INFLUENCE_COEFFICIENT *  Math.abs(sampleRTT - estimatedRTT))
 				.longValue();
-		timeoutValue = estimatedRTT + 4 * deviation;
+		timeoutValue = estimatedRTT + 15 * deviation;
 	}
 
 	/**
