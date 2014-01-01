@@ -9,14 +9,21 @@ package christian.filecopy;
 import java.io.*;
 import java.net.*;
 
+import util.huebner.BoundedBuffer;
+import util.huebner.BoundedBufferSyncMonitor;
+
 public class FileCopyClient extends Thread {
 
-  // -------- Constants
+ 
+
+// -------- Constants
   public final static boolean TEST_OUTPUT_MODE = false;
 
   public final int SERVER_PORT = 23000;
 
   public final int UDP_PACKET_SIZE = 1008;
+  
+  public final int END_OF_FILE = -1;
 
   // -------- Public parms
   public String servername;
@@ -32,6 +39,10 @@ public class FileCopyClient extends Thread {
   // -------- Variables
   // current default timeout in nanoseconds
   private long timeoutValue = 100000000L;
+  
+  InputStream fileToSend;
+  
+  private BoundedBuffer<FCpacket> sendBuffer = new BoundedBufferSyncMonitor<>(windowSize);
 
   // ... ToDo
 
@@ -49,7 +60,26 @@ public class FileCopyClient extends Thread {
 
   public void runFileCopyClient() {
 
-      // ToDo!!
+      
+	  
+	  try {
+		 fileToSend = new FileInputStream(sourcePath);
+	} catch (FileNotFoundException e) {
+		System.err.println("Could not find File " + sourcePath + " !");
+		e.printStackTrace();
+	}
+	  
+	  //1. Init: Kontroll-Paket packen, an SenderThread übergeben und abschicken lassen
+	  // ACK dafür muss kommen
+	  
+	  /* Kontroll-Paket Packen */
+	  FCpacket controlPacket = makeControlPacket();
+	  
+	  Thread sendThread = new Sender(controlPacket); 
+	 
+	  sendThread.start();
+	  //2. Normaler ablauf: Daten-Pakete schicken
+	  //3. Ende
 
 
   }
@@ -121,5 +151,45 @@ public class FileCopyClient extends Thread {
         argv[3], argv[4]);
     myClient.runFileCopyClient();
   }
+  
+  class Sender extends Thread {
+	  
+	private FCpacket controlPacket;
+	  
+	  
+	public Sender(FCpacket initialPacket) {
+		this.controlPacket = initialPacket;
+ 	}
+	
+	@Override
+	public void run() {
+		
+		sendToServer(controlPacket); 
+		sendBuffer.enter(controlPacket);
+		
+		
+		
+		byte[] packetData = new byte[UDP_PACKET_SIZE];
+		
+		boolean endOfFileReached = false; 
+		
+		while (!endOfFileReached) {
+			int readStatus = 0; //status, da wenn diese variable -1 ist, das dateiende erreicht wurde.
+			try {
+				readStatus = fileToSend.read(packetData, 0, UDP_PACKET_SIZE);
+			} catch (IOException e) {
+				System.err.println("Sender: IOException while reading from fileToSend");
+				e.printStackTrace();
+			} 
+			
+			if (readStatus == END_OF_FILE) endOfFileReached = true; //Datei komplett eingelesen
+		}
+	}
 
-}
+	private void sendToServer(FCpacket controlPacket2) {
+		// TODO Auto-generated method stub
+		
+	}
+
+  }
+}  
