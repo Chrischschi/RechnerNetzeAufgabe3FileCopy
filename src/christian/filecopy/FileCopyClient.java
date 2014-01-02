@@ -42,7 +42,7 @@ public class FileCopyClient extends Thread {
   
   InputStream fileToSend;
   
-  private BoundedBuffer<FCpacket> sendBuffer = new BoundedBufferSyncMonitor<>(windowSize);
+  private BoundedBuffer<FCpacket> sendBuffer;
 
   // ... ToDo
 
@@ -55,7 +55,7 @@ public class FileCopyClient extends Thread {
     destPath = destPathArg;
     windowSize = Integer.parseInt(windowSizeArg);
     serverErrorRate = Long.parseLong(errorRateArg);
-
+    sendBuffer = new BoundedBufferSyncMonitor<>(windowSize);
   }
 
   public void runFileCopyClient() {
@@ -155,6 +155,9 @@ public class FileCopyClient extends Thread {
   class Sender extends Thread {
 	  
 	private FCpacket controlPacket;
+	
+	private long nextSeqNum = 0;
+	
 	  
 	  
 	public Sender(FCpacket initialPacket) {
@@ -164,30 +167,74 @@ public class FileCopyClient extends Thread {
 	@Override
 	public void run() {
 		
-		sendToServer(controlPacket); 
+		//Kontroll-Paket abschicken
+		try {
+			sendToServer(controlPacket);
+		} catch (IOException e1) {
+			System.err.println("Sender: IOException while sending control packet!");
+			e1.printStackTrace();
+		} 
 		sendBuffer.enter(controlPacket);
+		startTimer(controlPacket);
 		
 		
+		
+		nextSeqNum = nextSeqNum + 1; 
 		
 		byte[] packetData = new byte[UDP_PACKET_SIZE];
 		
 		boolean endOfFileReached = false; 
 		
-		while (!endOfFileReached) {
+		while (!endOfFileReached) { //Datagramme verschicken
 			int readStatus = 0; //status, da wenn diese variable -1 ist, das dateiende erreicht wurde.
 			try {
-				readStatus = fileToSend.read(packetData, 0, UDP_PACKET_SIZE);
+				//Daten fuer naechstes zu verschickenes paket abholen
+				readStatus = fileToSend.read(packetData, 0, UDP_PACKET_SIZE); 
 			} catch (IOException e) {
 				System.err.println("Sender: IOException while reading from fileToSend");
 				e.printStackTrace();
 			} 
 			
-			if (readStatus == END_OF_FILE) endOfFileReached = true; //Datei komplett eingelesen
+			if (readStatus == END_OF_FILE)  {
+				System.out.println("Sender: Reached end of file");
+				endOfFileReached = true; //Datei komplett eingelesen
+			}
+			else {
+				FCpacket dataPacket = makeDataPacket(packetData);
+				try {
+					sendToServer(dataPacket);
+				} catch (SocketException e) {
+					System.err.println("Sender: SocketException while sending to Server");
+					e.printStackTrace();
+				} catch (IOException e) {
+					System.err.println("Sender: Other IOException while sending to Server");
+					e.printStackTrace();
+				}
+				sendBuffer.enter(dataPacket);
+				
+				startTimer(dataPacket);
+				
+				nextSeqNum = nextSeqNum + 1;
+			}
 		}
 	}
 
-	private void sendToServer(FCpacket controlPacket2) {
-		// TODO Auto-generated method stub
+	private FCpacket makeDataPacket(byte[] packetData) {
+		 return new FCpacket(nextSeqNum, packetData, UDP_PACKET_SIZE);
+	}
+
+	private void sendToServer(FCpacket aPacket) throws SocketException,IOException {
+		try(DatagramSocket sendSocket = new DatagramSocket()) {
+			//Daten von FCpacket auf DatagramPacket umpacken 
+			byte[] sendData = aPacket.getData();
+			DatagramPacket sendPacket = new DatagramPacket(sendData, aPacket.getLen());
+			
+			InetAddress serverAddress = InetAddress.getByName(servername);
+			
+			sendPacket.setAddress(serverAddress);
+			
+			sendSocket.send(sendPacket);
+		}
 		
 	}
 
