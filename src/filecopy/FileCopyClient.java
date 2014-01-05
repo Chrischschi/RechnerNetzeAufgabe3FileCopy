@@ -98,7 +98,8 @@ public class FileCopyClient extends Thread {
 		time = System.nanoTime();
 		clientSocket = new DatagramSocket();
 		inFromFile = new FileInputStream(sourcePath);
-		new FCReciever(sendBuffer, serverAdress, this);
+		FCReciever reciever = new FCReciever(sendBuffer, serverAdress, this);
+		reciever.run();
 		int inputStreamReturnValue = 1;
 		// 1a.KontrollPaket erstellen und in den Buffer schreiben
 		// sendBuffer.add(makeControlPacket()); //KontrollPaket wird direkt beim
@@ -108,8 +109,6 @@ public class FileCopyClient extends Thread {
 		sendBuffer.enter(controlPacket);
 		startTimer(controlPacket);
 		new sendThread(toDatagramPacket(controlPacket)).start();
-		
-			
 				// 7.F�lle den Buffer, bis dieser eine gr��e von windowSize
 				// erreicht hat oder alle Daten der datei eingelesen wurden und
 				// sende die neuen Pakete.
@@ -126,7 +125,7 @@ public class FileCopyClient extends Thread {
 			currentPacketNumber++;
 			}
 		}
-		if(!sendBuffer.isEmpty()){
+		while(!sendBuffer.isEmpty()){
 			try {
 				this.wait();
 			} catch (InterruptedException e) {
@@ -134,6 +133,8 @@ public class FileCopyClient extends Thread {
 				e.printStackTrace();
 			}
 		}
+		reciever.interrupt();
+		reciever.closeSocket();
 		// 8.Sende die Daten-Pakete (Alle auf einmal? -> ack verpasst?(vlt
 		// eigener Thread zum warten auf antwort))
 		 // 9.gehe zu 3 wenn der buffer nicht leer ist
