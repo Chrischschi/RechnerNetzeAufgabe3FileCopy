@@ -43,26 +43,28 @@ public class FileCopyClient extends Thread {
   InputStream fileToSend;
   
   private BoundedBuffer<FCpacket> sendBuffer;
+  
+  private DatagramSocket toServer;
 
   // ... ToDo
 
 
   // Constructor
   public FileCopyClient(String serverArg, String sourcePathArg,
-    String destPathArg, String windowSizeArg, String errorRateArg) {
+    String destPathArg, String windowSizeArg, String errorRateArg) throws SocketException {
     servername = serverArg;
     sourcePath = sourcePathArg;
     destPath = destPathArg;
     windowSize = Integer.parseInt(windowSizeArg);
     serverErrorRate = Long.parseLong(errorRateArg);
     sendBuffer = new BoundedBufferSyncMonitor<>(windowSize);
+    toServer = new DatagramSocket();
   }
 
   public void runFileCopyClient() {
 
-      
 	  
-	  try {
+	try {
 		 fileToSend = new FileInputStream(sourcePath);
 	} catch (FileNotFoundException e) {
 		System.err.println("Could not find File " + sourcePath + " !");
@@ -75,7 +77,7 @@ public class FileCopyClient extends Thread {
 	  /* Kontroll-Paket Packen */
 	  FCpacket controlPacket = makeControlPacket();
 	  
-	  Thread sendThread = new Sender(controlPacket); 
+	  Thread sendThread = new PacketSender(controlPacket); 
 	 
 	  sendThread.start();
 	  //2. Normaler ablauf: Daten-Pakete schicken
@@ -145,6 +147,19 @@ public class FileCopyClient extends Thread {
           .currentThread().getName(), out);
     }
   }
+  
+  private void sendToServer(FCpacket aPacket) throws SocketException,IOException {
+			//Daten von FCpacket auf DatagramPacket umpacken 
+			byte[] sendData = aPacket.getData();
+			DatagramPacket sendPacket = new DatagramPacket(sendData, aPacket.getLen());
+			
+			InetAddress serverAddress = InetAddress.getByName(servername);
+			
+			sendPacket.setAddress(serverAddress);
+			
+			toServer.send(sendPacket);
+		
+	}
 
   public static void main(String argv[]) throws Exception {
     FileCopyClient myClient = new FileCopyClient(argv[0], argv[1], argv[2],
@@ -152,7 +167,8 @@ public class FileCopyClient extends Thread {
     myClient.runFileCopyClient();
   }
   
-  class Sender extends Thread {
+  class PacketSender extends Thread {
+	   
 	  
 	private FCpacket controlPacket;
 	
@@ -160,7 +176,7 @@ public class FileCopyClient extends Thread {
 	
 	  
 	  
-	public Sender(FCpacket initialPacket) {
+	public PacketSender(FCpacket initialPacket) {
 		this.controlPacket = initialPacket;
  	}
 	
@@ -200,7 +216,7 @@ public class FileCopyClient extends Thread {
 				endOfFileReached = true; //Datei komplett eingelesen
 			}
 			else {
-				FCpacket dataPacket = makeDataPacket(packetData);
+				FCpacket dataPacket = makeDataPacket(nextSeqNum,packetData);
 				try {
 					sendToServer(dataPacket);
 				} catch (SocketException e) {
@@ -219,24 +235,53 @@ public class FileCopyClient extends Thread {
 		}
 	}
 
-	private FCpacket makeDataPacket(byte[] packetData) {
-		 return new FCpacket(nextSeqNum, packetData, UDP_PACKET_SIZE);
+	private FCpacket makeDataPacket(long seqNum,byte[] packetData) {
+		 return new FCpacket(seqNum, packetData, UDP_PACKET_SIZE);
 	}
-
-	private void sendToServer(FCpacket aPacket) throws SocketException,IOException {
-		try(DatagramSocket sendSocket = new DatagramSocket()) {
-			//Daten von FCpacket auf DatagramPacket umpacken 
-			byte[] sendData = aPacket.getData();
-			DatagramPacket sendPacket = new DatagramPacket(sendData, aPacket.getLen());
-			
-			InetAddress serverAddress = InetAddress.getByName(servername);
-			
-			sendPacket.setAddress(serverAddress);
-			
-			sendSocket.send(sendPacket);
+  }
+  
+  class ACKReciever extends Thread { 
+	  private DatagramSocket fromServer = toServer;
+	  
+	  @Override
+	  public void run() {
+		  
+		   DatagramPacket recvPacket = new DatagramPacket(new byte[UDP_PACKET_SIZE], UDP_PACKET_SIZE); 
+		try {
+			fromServer.receive(recvPacket);
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
 		}
 		
-	}
+		FCpacket fcReceivePacket = new FCpacket(recvPacket.getData(), recvPacket.getLength());
+		
+		if (sendBuffer.contains(fcReceivePacket) ) {
+			fcReceivePacket.setValidACK(true); //Markiere Paket n als quittiert
+			
+			fcReceivePacket.getTimer().interrupt(); //Timer für Paket n stoppen
+			
+			timeoutValue = computeTimeoutValue(sampleRTT); //Timeoutwert mit gemessener RTT für Paket n neu berechnen
+			
+			if(fcReceivePacket.getSeqNum() == sendBuffer.peek().getSeqNum()) { //Wenn n = sendbase,
+				 /* dann lösche ab n alle Pakete, bis ein noch nicht quittiertes Paket im Sen-
+				 depuffer erreicht ist, und setze sendbase auf dessen Sequenznummer */
+				while(sendBuffer.peek().isValidACK()) {
+					sendBuffer.remove();
+				}
+				/*Das setzen von sendbase entfällt, da sendBase immer das erste element
+				 * des Puffers referenziert, den "head". 
+				 */
+				
+			}
+			
+			
+		}
+		   
+		   
 
+
+		  
+	  }
   }
 }  

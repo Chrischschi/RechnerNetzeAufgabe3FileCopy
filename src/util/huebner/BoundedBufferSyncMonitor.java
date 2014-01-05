@@ -119,4 +119,11 @@ public class BoundedBufferSyncMonitor<E> implements BoundedBuffer<E> {
 	public synchronized boolean isEmpty() {
 		return buffer.isEmpty();
 	}
+	
+	@Override
+	public synchronized boolean contains(Object o) {
+		return buffer.contains(o);
+	}
+	
+	
 }

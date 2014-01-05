@@ -24,5 +24,7 @@ public interface BoundedBuffer<E> {
 
   
   public boolean isEmpty();
+
+  public boolean contains(Object object);
   
 }
